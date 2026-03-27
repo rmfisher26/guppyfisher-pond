@@ -1,0 +1,94 @@
+---
+// src/components/GuppyPanel.astro
+// Static component — Guppy source code is syntax-highlighted at build time.
+// No client JS required for this panel.
+
+import { highlightGuppy } from '../utils/highlight';
+
+interface Props {
+  code: string;
+  name: string;
+  description: string;
+}
+
+const { code, name, description } = Astro.props;
+const highlighted = highlightGuppy(code);
+---
+
+<div class="guppy-panel">
+  <div class="panel-header">
+    <span class="badge badge-green">⬡ Guppy</span>
+    <span class="panel-name">{name}</span>
+    <span class="panel-desc">{description}</span>
+  </div>
+  <div class="panel-body">
+    <pre class="code-block" set:html={highlighted} />
+  </div>
+</div>
+
+<style>
+  .guppy-panel {
+    background: var(--bg1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+
+  .guppy-panel.is-active {
+    border-color: var(--green);
+    box-shadow: 0 0 24px color-mix(in srgb, var(--green) 12%, transparent);
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    flex-wrap: wrap;
+  }
+
+  .badge {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 5px;
+    letter-spacing: 0.04em;
+  }
+
+  .badge-green {
+    background: color-mix(in srgb, var(--green) 20%, transparent);
+    color: var(--green);
+  }
+
+  .panel-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .panel-desc {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    margin-left: auto;
+  }
+
+  .panel-body { padding: 0; }
+
+  .code-block {
+    background: #050608;
+    margin: 0;
+    padding: 16px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.75;
+    color: #c0c8d8;
+    overflow-x: auto;
+    white-space: pre;
+    border: none;
+  }
+</style>

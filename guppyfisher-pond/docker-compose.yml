@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - ALLOWED_ORIGINS=["http://localhost:4321","https://guppyfisher.dev"]
+      - EXECUTION_TIMEOUT=10.0
+      - MAX_CODE_LENGTH=4000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "4321:4321"
+    environment:
+      - BACKEND_URL=http://backend:8000
+      - PUBLIC_LIVE_BACKEND=true
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    depends_on:
+      backend:
+        condition: service_healthy

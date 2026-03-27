@@ -1,0 +1,72 @@
+/* src/styles/global.css */
+/* Design tokens, reset, and shared syntax highlight classes */
+
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;900&family=Fira+Code:wght@400;500&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Palette */
+  --bg:      #07080c;
+  --bg1:     #0d0f16;
+  --bg2:     #12151f;
+  --bg3:     #181c28;
+  --border:  #1e2436;
+  --text:    #d8e0f0;
+  --muted:   #505878;
+
+  /* Accent */
+  --green:   #1a6b4a;
+  --green-l: #2a9d6a;
+  --blue:    #4a80c8;
+  --red:     #c84040;
+  --purple:  #a040c8;
+  --gold:    #c8a040;
+
+  /* Typography */
+  --font-body: 'Outfit', sans-serif;
+  --font-mono: 'Fira Code', monospace;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+/* ── Syntax highlight tokens ───────────────────────────────────────── */
+/* Used by highlightGuppy() and highlightJson() in components          */
+
+.hl-kw  { color: #f08090; font-style: italic; }
+.hl-dec { color: #d0b050; }
+.hl-typ { color: #50c898; }
+.hl-fn  { color: #78b8e0; }
+.hl-str { color: #88c868; }
+.hl-com { color: #3a4050; font-style: italic; }
+.hl-num { color: #e0a060; }
+
+.hl-jkey { color: #78b8e0; }
+.hl-jstr { color: #88c868; }
+.hl-jnum { color: #e0a060; }
+.hl-jkw  { color: #f08090; }
+
+/* ── Scrollbar ─────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg1); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* ── Utilities ─────────────────────────────────────────────────────── */
+.mono { font-family: var(--font-mono); }
+.muted { color: var(--muted); }
+
+/* ── Animations ────────────────────────────────────────────────────── */
+@keyframes spin     { to { transform: rotate(360deg); } }
+@keyframes fadeIn   { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
+@keyframes slideIn  { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; } }
+@keyframes grow     { from { width: 0%; } }
+@keyframes pulse    { 0%,100%{ opacity:1; transform:scale(1); } 50%{ opacity:0.4; transform:scale(0.7); } }
+@keyframes superpos { from{ box-shadow:0 0 0 0 #c8a04020; } to{ box-shadow:0 0 12px 4px #c8a04040; } }
+@keyframes entangle { 0%,100%{ box-shadow:0 0 0 0 #4a80c820; } 50%{ box-shadow:0 0 14px 4px #4a80c840; } }

@@ -1,0 +1,28 @@
+---
+// src/pages/index.astro
+import BaseLayout         from '../layouts/BaseLayout.astro';
+import PipelineController from '../components/PipelineController';
+---
+
+<BaseLayout
+  title="Pipeline Visualizer | GuppyFisher"
+  description="Trace a Guppy program through the full Quantinuum stack: HUGR IR → TKET → Selene emulation."
+>
+  <div class="page-wrapper">
+    <!--
+      PipelineController is the single React island for the whole app.
+      client:load means it hydrates immediately — appropriate since the
+      entire page is interactive. All four panels (Guppy, HUGR, TKET, Selene)
+      are managed inside the island; program switching updates all panels via state.
+    -->
+    <PipelineController client:load initialProgram="bell" />
+  </div>
+</BaseLayout>
+
+<style>
+  .page-wrapper {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding-bottom: 60px;
+  }
+</style>

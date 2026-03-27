@@ -1,0 +1,111 @@
+---
+// src/pages/404.astro
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout title="404 | GuppyFisher" description="Page not found">
+  <div class="not-found">
+    <div class="nf-code">404</div>
+    <h1 class="nf-title">LinearityError</h1>
+    <p class="nf-msg">
+      The page you're looking for has been consumed — and you know you can't use a qubit twice.
+    </p>
+    <div class="nf-trace">
+      <div class="nf-line"><span class="nf-err">PageNotFoundError</span>: path '{Astro.url.pathname}' does not exist</div>
+      <div class="nf-line nf-hint">  hint: check the URL or navigate back to safety</div>
+    </div>
+    <div class="nf-actions">
+      <a href="/" class="nf-btn nf-btn--primary">← Back to visualizer</a>
+      <a href="/tutorials" class="nf-btn">Tutorials</a>
+      <a href="/community" class="nf-btn">Community</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .not-found {
+    max-width: 560px;
+    margin: 80px auto;
+    padding: 0 24px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .nf-code {
+    font-family: var(--font-mono);
+    font-size: 80px;
+    font-weight: 900;
+    color: var(--border);
+    line-height: 1;
+    letter-spacing: -0.04em;
+  }
+
+  .nf-title {
+    font-family: var(--font-mono);
+    font-size: 28px;
+    color: var(--red);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .nf-msg {
+    font-size: 15px;
+    color: var(--muted);
+    line-height: 1.7;
+  }
+
+  .nf-trace {
+    background: #050608;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--red);
+    border-radius: 8px;
+    padding: 14px 18px;
+    text-align: left;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .nf-line {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  .nf-err  { color: var(--red); }
+  .nf-hint { color: var(--gold); }
+
+  .nf-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .nf-btn {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 8px 18px;
+    border-radius: 7px;
+    text-decoration: none;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    transition: all 0.15s;
+  }
+
+  .nf-btn:hover { color: var(--text); border-color: var(--muted); }
+
+  .nf-btn--primary {
+    background: var(--green);
+    color: #fff;
+    border-color: var(--green);
+  }
+
+  .nf-btn--primary:hover { background: #22a06b; color: #fff; border-color: #22a06b; }
+</style>
