@@ -1,9 +1,9 @@
-# guppyfisher
+# guppyfisher-pond
 
 Full-stack Guppy Pipeline Visualizer for [guppyfisher.dev](https://guppyfisher.dev).
 
 ```
-guppyfisher/
+guppyfisher-pond/
 ├── frontend/   Astro + React app  — the Pipeline Visualizer UI
 └── backend/    FastAPI server     — sandboxed Guppy compiler
 ```
