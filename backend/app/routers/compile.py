@@ -25,9 +25,14 @@ async def compile_endpoint(req: CompileRequest) -> CompileResponse:
         lines=[OutputLine(**line) for line in result["lines"]],
         hugr_json=result.get("hugr"),
         elapsed_ms=result.get("elapsed_ms"),
+        selene=result.get("selene"),
     )
     hugr_summary = f"{len(json.dumps(response.hugr_json))} bytes" if response.hugr_json else "None"
-    logger.debug("POST /api/compile — success: %s, elapsed_ms: %s, hugr: %s\n%s",
-                 response.success, response.elapsed_ms, hugr_summary,
+    selene_summary = (
+        f"{len(response.selene.results)} outcomes, {response.selene.shots} shots"
+        if response.selene else "None"
+    )
+    logger.debug("POST /api/compile — success: %s, elapsed_ms: %s, hugr: %s, selene: %s\n%s",
+                 response.success, response.elapsed_ms, hugr_summary, selene_summary,
                  "\n".join(f"  [{l.t}] {l.text}" for l in response.lines))
     return response

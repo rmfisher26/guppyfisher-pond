@@ -19,8 +19,31 @@ class OutputLine(BaseModel):
     text: str
 
 
+class SeleneResult(BaseModel):
+    state: str
+    count: int
+    correlated: bool
+
+
+class TimelineStep(BaseModel):
+    step: int
+    label: str
+    state: list[float]
+    sup: bool = False
+    entangled: bool = False
+    classical: bool = False
+
+
+class SeleneData(BaseModel):
+    shots: int
+    simulator: str
+    results: list[SeleneResult]
+    timeline: list[TimelineStep]
+
+
 class CompileResponse(BaseModel):
     success: bool
     lines: list[OutputLine]
     hugr_json: dict | None = None   # Serialised HUGR, if compilation succeeded
     elapsed_ms: int | None = None
+    selene: SeleneData | None = None

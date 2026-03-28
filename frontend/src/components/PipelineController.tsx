@@ -44,8 +44,9 @@ export default function PipelineController({ initialProgram = 'bell' }: Props) {
   const [seleneRun,  setSeleneRun]  = useState(false);
   const [seleneDone, setSeleneDone] = useState(false);
   const [copied,       setCopied]       = useState(false);
-  const [liveHugrJson, setLiveHugrJson] = useState<string | null>(null);
-  const [compileError, setCompileError] = useState<string | null>(null);
+  const [liveHugrJson,    setLiveHugrJson]    = useState<string | null>(null);
+  const [liveSeleneData,  setLiveSeleneData]  = useState<Program['selene'] | null>(null);
+  const [compileError,    setCompileError]    = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const prog: Program = PROGRAMS[programKey] ?? PROGRAMS['bell'];
@@ -79,7 +80,7 @@ export default function PipelineController({ initialProgram = 'bell' }: Props) {
     clearTimer();
     setRunning(false); setReachedIdx(-1); setActiveIdx(0);
     setStateStep(0); setSeleneRun(false); setSeleneDone(false);
-    setLiveHugrJson(null); setCompileError(null);
+    setLiveHugrJson(null); setLiveSeleneData(null); setCompileError(null);
   }, []);
 
   useEffect(() => { resetPipeline(); }, [programKey]);
@@ -122,12 +123,15 @@ export default function PipelineController({ initialProgram = 'bell' }: Props) {
         const data = await res.json();
         if (data.success && data.hugr_json) {
           setLiveHugrJson(JSON.stringify(data.hugr_json, null, 2));
+          if (data.selene) setLiveSeleneData(data.selene);
+          const seleneTimeline = data.selene?.timeline ?? prog.selene.timeline;
+          animatePipeline(seleneTimeline.length - 1);
         } else {
           const errors = (data.lines ?? []).filter((l: { t: string }) => l.t === 'error').map((l: { text: string }) => l.text).join('\n');
           setCompileError(errors || 'Compilation failed');
           setRunning(false);
-          return;
         }
+        return;
       } catch {
         setCompileError('Backend unreachable at ' + BACKEND_URL);
         setRunning(false);
@@ -221,7 +225,7 @@ export default function PipelineController({ initialProgram = 'bell' }: Props) {
           <TKETPanel data={prog.tket} isActive={activeIdx === 2}/>
         </div>
         <div style={{ opacity: reachedIdx >= 3 ? 1 : 0.35, transition: 'opacity 0.5s' }}>
-          <SelenePanel data={prog.selene} tket={prog.tket} stateStep={stateStep}
+          <SelenePanel data={liveSeleneData ?? prog.selene} tket={prog.tket} stateStep={stateStep}
             running={seleneRun && !seleneDone} done={seleneDone} isActive={activeIdx === 3}/>
         </div>
       </div>

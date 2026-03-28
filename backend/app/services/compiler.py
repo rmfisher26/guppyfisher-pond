@@ -45,6 +45,31 @@ _ALLOWED_BUILTINS = {
 
 # ── Worker (runs in subprocess) ───────────────────────────────────────────────
 
+def _synthesize_timeline(code: str, n_qubits: int) -> list:
+    """Build a simplified state-evolution timeline by scanning the source for gate calls."""
+    lower = code.lower()
+    timeline = [{"step": 0, "label": f"Init |{'0' * n_qubits}⟩", "state": [0.0] * n_qubits}]
+    step = 1
+    state: list[float] = [0.0] * n_qubits
+
+    if "h(" in lower:
+        state = [0.5] + [0.0] * (n_qubits - 1)
+        timeline.append({"step": step, "label": "After H on q[0]", "state": state[:], "sup": True})
+        step += 1
+
+    cx_count = lower.count("cx(")
+    subscripts = "₁₂₃₄₅"
+    for i in range(cx_count):
+        state = [0.5] * n_qubits
+        label = ("After CX" if cx_count == 1
+                 else f"After CX{subscripts[i] if i < len(subscripts) else i + 1}")
+        timeline.append({"step": step, "label": label, "state": state[:], "entangled": True})
+        step += 1
+
+    timeline.append({"step": step, "label": "Measured", "state": [1.0] * n_qubits, "classical": True})
+    return timeline
+
+
 def _worker(code: str, result_queue: multiprocessing.Queue) -> None:
     """
     Executes `code` and pushes a dict onto `result_queue`:
@@ -82,16 +107,14 @@ def _worker(code: str, result_queue: multiprocessing.Queue) -> None:
         emit("info", "Resolving types…")
 
         # Write to a real file so inspect.getsourcelines() can read it.
-        # Keep the file alive until after compile_function() is called below.
+        # Keep the file alive until after ALL guppy compile_function() calls
+        # (including the Selene wrapper) are complete.
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as tmp:
             tmp.write(code)
             tmp_path = tmp.name
         try:
             exec(compile(code, tmp_path, "exec"), namespace)  # noqa: S102
 
-            # Find @guppy-decorated functions; GuppyFunctionDefinition cannot be
-            # monkeypatched so we call compile_function() ourselves here while
-            # the source file is still on disk.
             from guppylang.defs import GuppyFunctionDefinition as _GuppyFn
             guppy_fns = [v for v in namespace.values() if isinstance(v, _GuppyFn)]
             if not guppy_fns:
@@ -103,28 +126,115 @@ def _worker(code: str, result_queue: multiprocessing.Queue) -> None:
             fn_name = getattr(fn_def.wrapped, "name", "function")
             emit("info", f"Compiling function: {fn_name!r}")
             hugr = fn_def.compile_function()
+
+            emit("success", "Linearity check passed ✓")
+            emit("success", "Compiled successfully")
+
+            import json as _json
+            hugr_dict = _json.loads(hugr.to_json())
+
+            try:
+                nodes = hugr_dict.get("modules", [{}])[0].get("nodes", [])
+                for node in nodes[:20]:
+                    op = node.get("op", "?")
+                    ntype = op if isinstance(op, str) else op.get("type", "?")
+                    nid = node.get("parent", "?")
+                    emit("hugr", f"  Node({nid}): {ntype}")
+            except Exception:
+                emit("hugr", str(hugr_dict)[:400])
+
+            # ── Selene emulation ──────────────────────────────────────────────
+            # Must run before os.unlink(tmp_path) because guppy re-parses the
+            # user's function (from tmp_path) when compiling the wrapper.
+            import inspect as _inspect
+            _python_func = getattr(fn_def.wrapped, "python_func", None) or fn_def.wrapped
+            _qubit_params = [
+                p.name for p in _inspect.signature(_python_func).parameters.values()
+                if "qubit" in str(p.annotation).lower()
+            ]
+            n_qubits = len(_qubit_params)
+
+            selene_data = None
+            if n_qubits > 0:
+                try:
+                    from selene_sim import build as _selene_build, Quest as _Quest
+                    from hugr.qsystem.result import QsysResult as _QsysResult
+
+                    N_SHOTS = 200
+
+                    # Selene requires a no-input entry point — wrap the user's
+                    # function in one that allocates qubits internally and records
+                    # measurement results via result("out", ...).
+                    _return_ann = _python_func.__annotations__.get("return", None)
+                    _n_bools = 0
+                    if _return_ann is not None:
+                        _args = getattr(_return_ann, "__args__", None)
+                        if _args:
+                            _n_bools = sum(1 for a in _args if a is bool)
+                        elif _return_ann is bool:
+                            _n_bools = 1
+
+                    _allocations = "\n    ".join(f"{name} = qubit()" for name in _qubit_params)
+                    _call_args = ", ".join(_qubit_params)
+                    if _n_bools > 0:
+                        _ret_vars = ", ".join(f"_b{i}" for i in range(_n_bools))
+                        _call_line = (
+                            f"    {_ret_vars} = {fn_name}({_call_args})\n"
+                            f"    result(\"out\", [{_ret_vars}])"
+                        )
+                    else:
+                        _call_line = f"    {fn_name}({_call_args})"
+
+                    _wrapper_src = (
+                        f"@guppy\n"
+                        f"def _selene_entry() -> None:\n"
+                        f"    {_allocations}\n"
+                        f"{_call_line}\n"
+                    )
+                    import linecache as _linecache
+                    _fake_filename = f"<selene_wrapper_{fn_name}>"
+                    _linecache.cache[_fake_filename] = (
+                        len(_wrapper_src), None, _wrapper_src.splitlines(True), _fake_filename
+                    )
+                    exec(compile(_wrapper_src, _fake_filename, "exec"), namespace)
+                    _entry_fns = [
+                        v for v in namespace.values()
+                        if isinstance(v, _GuppyFn)
+                        and getattr(getattr(v, "wrapped", None), "name", "") == "_selene_entry"
+                    ]
+                    _entry_hugr = _entry_fns[-1].compile_function()
+
+                    runner = _selene_build(_entry_hugr)
+                    raw = runner.run_shots(_Quest(), n_qubits=n_qubits, n_shots=N_SHOTS)
+                    counts = _QsysResult(raw).collated_counts()
+
+                    # counts keys are tuple[tuple[tag, bitstring], ...]
+                    # e.g. (('out', '00'),) → extract the bitstring from the 'out' tag
+                    selene_results = []
+                    for key, count in sorted(counts.items(), key=lambda x: -x[1]):
+                        tag_map = dict(key)
+                        state_str = tag_map.get("out", "".join(v for _, v in key))
+                        correlated = state_str in ("0" * n_qubits, "1" * n_qubits)
+                        selene_results.append({"state": state_str, "count": int(count), "correlated": correlated})
+                        emit("info", f"  Selene shot result: |{state_str}⟩ × {count}")
+
+                    timeline = _synthesize_timeline(code, n_qubits)
+                    selene_data = {
+                        "shots": N_SHOTS,
+                        "simulator": "Quest",
+                        "results": selene_results,
+                        "timeline": timeline,
+                    }
+                    emit("info", f"Selene: {N_SHOTS} shots via Quest ({n_qubits} qubits) — {len(selene_results)} outcomes")
+                except ImportError:
+                    emit("info", "selene-sim not installed — skipping emulation")
+                except Exception as exc:
+                    emit("info", f"Selene error: {exc}")
+
+            result_queue.put({"lines": lines, "hugr": hugr_dict, "selene": selene_data, "success": True})
+
         finally:
             os.unlink(tmp_path)
-
-        emit("success", "Linearity check passed ✓")
-        emit("success", "Compiled successfully")
-
-        # to_json() returns a JSON string in guppylang 0.21+
-        import json as _json
-        hugr_dict = _json.loads(hugr.to_json())
-
-        # Emit top-level HUGR nodes as readable lines
-        try:
-            nodes = hugr_dict.get("modules", [{}])[0].get("nodes", [])
-            for node in nodes[:20]:
-                op = node.get("op", "?")
-                ntype = op if isinstance(op, str) else op.get("type", "?")
-                nid = node.get("parent", "?")
-                emit("hugr", f"  Node({nid}): {ntype}")
-        except Exception:
-            emit("hugr", str(hugr_dict)[:400])
-
-        result_queue.put({"lines": lines, "hugr": hugr_dict, "success": True})
 
     except Exception as exc:  # noqa: BLE001
         # Format the traceback, scrubbing internal paths
