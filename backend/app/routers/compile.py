@@ -18,7 +18,7 @@ async def compile_endpoint(req: CompileRequest) -> CompileResponse:
             detail=f"Code exceeds {settings.max_code_length} character limit",
         )
 
-    result = await compile_guppy(req.code, timeout=settings.execution_timeout)
+    result = await compile_guppy(req.code, timeout=settings.execution_timeout, selene_shots=req.selene_shots)
 
     response = CompileResponse(
         success=result["success"],

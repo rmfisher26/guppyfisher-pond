@@ -7,6 +7,7 @@ from typing import Literal
 class CompileRequest(BaseModel):
     code: str = Field(..., description="Guppy Python source to compile")
     filename: str = Field(default="playground.py", description="Display name only")
+    selene_shots: int = Field(default=200, ge=1, le=10000, description="Number of Selene emulation shots")
 
 
 # ── Response ─────────────────────────────────────────────────────────────────

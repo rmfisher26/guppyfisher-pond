@@ -70,7 +70,7 @@ def _synthesize_timeline(code: str, n_qubits: int) -> list:
     return timeline
 
 
-def _worker(code: str, result_queue: multiprocessing.Queue) -> None:
+def _worker(code: str, result_queue: multiprocessing.Queue, selene_shots: int = 200) -> None:
     """
     Executes `code` and pushes a dict onto `result_queue`:
         {"lines": [...], "hugr": dict | None, "success": bool}
@@ -160,7 +160,7 @@ def _worker(code: str, result_queue: multiprocessing.Queue) -> None:
                     from selene_sim import build as _selene_build, Quest as _Quest
                     from hugr.qsystem.result import QsysResult as _QsysResult
 
-                    N_SHOTS = 200
+                    N_SHOTS = selene_shots
 
                     # Selene requires a no-input entry point — wrap the user's
                     # function in one that allocates qubits internally and records
@@ -266,13 +266,13 @@ def _worker(code: str, result_queue: multiprocessing.Queue) -> None:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-async def compile_guppy(code: str, timeout: float = 10.0) -> dict:
+async def compile_guppy(code: str, timeout: float = 10.0, selene_shots: int = 200) -> dict:
     """
     Run `_worker` in a subprocess with a wall-clock timeout.
     Returns {"lines", "hugr", "success", "elapsed_ms"}.
     """
     queue: multiprocessing.Queue = multiprocessing.Queue()
-    proc = multiprocessing.Process(target=_worker, args=(code, queue), daemon=True)
+    proc = multiprocessing.Process(target=_worker, args=(code, queue, selene_shots), daemon=True)
 
     t0 = time.monotonic()
     proc.start()
