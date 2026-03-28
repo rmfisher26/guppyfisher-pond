@@ -1,3 +1,4 @@
+import json
 import logging
 from fastapi import APIRouter, HTTPException
 from app.schemas import CompileRequest, CompileResponse, OutputLine
@@ -10,7 +11,7 @@ router = APIRouter()
 
 @router.post("/compile", response_model=CompileResponse)
 async def compile_endpoint(req: CompileRequest) -> CompileResponse:
-    logger.debug("POST /api/compile — code length: %d", len(req.code))
+    logger.debug("POST /api/compile — code length: %d\n%s", len(req.code), req.code)
     if len(req.code) > settings.max_code_length:
         raise HTTPException(
             status_code=400,
@@ -19,9 +20,14 @@ async def compile_endpoint(req: CompileRequest) -> CompileResponse:
 
     result = await compile_guppy(req.code, timeout=settings.execution_timeout)
 
-    return CompileResponse(
+    response = CompileResponse(
         success=result["success"],
         lines=[OutputLine(**line) for line in result["lines"]],
         hugr_json=result.get("hugr"),
         elapsed_ms=result.get("elapsed_ms"),
     )
+    hugr_summary = f"{len(json.dumps(response.hugr_json))} bytes" if response.hugr_json else "None"
+    logger.debug("POST /api/compile — success: %s, elapsed_ms: %s, hugr: %s\n%s",
+                 response.success, response.elapsed_ms, hugr_summary,
+                 "\n".join(f"  [{l.t}] {l.text}" for l in response.lines))
+    return response
