@@ -166,22 +166,29 @@ def _worker(code: str, result_queue: multiprocessing.Queue) -> None:
                     # function in one that allocates qubits internally and records
                     # measurement results via result("out", ...).
                     _return_ann = _python_func.__annotations__.get("return", None)
+
+                    def _is_bool_type(a: object) -> bool:
+                        # In the exec'd namespace, bool annotations are GuppyDefinitions
+                        # wrapping an OpaqueTypeDef named 'bool', not Python's bool itself.
+                        if a is bool:
+                            return True
+                        wrapped = getattr(a, "wrapped", None)
+                        return getattr(wrapped, "name", None) == "bool"
+
                     _n_bools = 0
                     if _return_ann is not None:
                         _args = getattr(_return_ann, "__args__", None)
                         if _args:
-                            _n_bools = sum(1 for a in _args if a is bool)
-                        elif _return_ann is bool:
+                            _n_bools = sum(1 for a in _args if _is_bool_type(a))
+                        elif _is_bool_type(_return_ann):
                             _n_bools = 1
 
                     _allocations = "\n    ".join(f"{name} = qubit()" for name in _qubit_params)
                     _call_args = ", ".join(_qubit_params)
                     if _n_bools > 0:
                         _ret_vars = ", ".join(f"_b{i}" for i in range(_n_bools))
-                        _call_line = (
-                            f"    {_ret_vars} = {fn_name}({_call_args})\n"
-                            f"    result(\"out\", [{_ret_vars}])"
-                        )
+                        _result_calls = "\n    ".join(f'result("out", _b{i})' for i in range(_n_bools))
+                        _call_line = f"    {_ret_vars} = {fn_name}({_call_args})\n    {_result_calls}"
                     else:
                         _call_line = f"    {fn_name}({_call_args})"
 
