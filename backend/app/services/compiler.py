@@ -70,6 +70,109 @@ def _synthesize_timeline(code: str, n_qubits: int) -> list:
     return timeline
 
 
+def _build_tket_data(code: str, qubit_params: list) -> dict | None:
+    """Parse the Guppy source AST to build a pytket circuit and run optimisation."""
+    import ast as _ast
+    try:
+        from pytket.circuit import Circuit as _Circuit, OpType as _OpType
+        from pytket.passes import FullPeepholeOptimise as _FPO
+    except ImportError:
+        return None
+
+    n_qubits = len(qubit_params)
+    if n_qubits == 0:
+        return None
+
+    qubit_index = {name: i for i, name in enumerate(qubit_params)}
+
+    GATE_MAP = {
+        "h": _OpType.H, "x": _OpType.X, "y": _OpType.Y, "z": _OpType.Z,
+        "cx": _OpType.CX, "cnot": _OpType.CX, "cz": _OpType.CZ,
+        "rx": _OpType.Rx, "ry": _OpType.Ry, "rz": _OpType.Rz,
+        "s": _OpType.S, "t": _OpType.T,
+    }
+
+    try:
+        tree = _ast.parse(code)
+    except SyntaxError:
+        return None
+
+    func_body = None
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.FunctionDef):
+            func_body = node.body
+            break
+    if func_body is None:
+        return None
+
+    circ = _Circuit(n_qubits, n_qubits)
+    for stmt in func_body:
+        for node in _ast.walk(stmt):
+            if not isinstance(node, _ast.Call):
+                continue
+            func_name = ""
+            if isinstance(node.func, _ast.Name):
+                func_name = node.func.id.lower()
+            elif isinstance(node.func, _ast.Attribute):
+                func_name = node.func.attr.lower()
+
+            if func_name == "measure":
+                if node.args and isinstance(node.args[0], _ast.Name):
+                    q = qubit_index.get(node.args[0].id)
+                    if q is not None:
+                        circ.Measure(q, q)
+            elif func_name in GATE_MAP:
+                q_indices = [
+                    qubit_index[a.id]
+                    for a in node.args
+                    if isinstance(a, _ast.Name) and a.id in qubit_index
+                ]
+                if q_indices:
+                    try:
+                        circ.add_gate(GATE_MAP[func_name], q_indices)
+                    except Exception:
+                        pass
+
+    def _extract_gates(circuit: "_Circuit") -> list:
+        col_tracker: dict[int, int] = {}
+        gates = []
+        for cmd in circuit.get_commands():
+            q_idxs = [q.index[0] for q in cmd.qubits if q.index]
+            b_idxs = [b.index[0] for b in cmd.bits if b.index]
+            col = max((col_tracker.get(q, 0) for q in q_idxs), default=0)
+            for q in q_idxs:
+                col_tracker[q] = col + 1
+            gate: dict = {"type": cmd.op.type.name, "qubits": q_idxs, "col": col}
+            if b_idxs:
+                gate["bits"] = b_idxs
+            gates.append(gate)
+        return gates
+
+    def _get_stats(circuit: "_Circuit") -> dict:
+        return {
+            "gates": circuit.n_gates,
+            "depth": circuit.depth(),
+            "twoQ": sum(1 for cmd in circuit.get_commands() if len(cmd.qubits) == 2),
+        }
+
+    opt_circ = circ.copy()
+    opt_note = ""
+    try:
+        _FPO().apply(opt_circ)
+        opt_note = "FullPeepholeOptimise"
+    except Exception:
+        pass
+
+    return {
+        "qubits": [f"q[{i}]" for i in range(n_qubits)],
+        "bits":   [f"c[{i}]" for i in range(n_qubits)],
+        "gates":  _extract_gates(circ),
+        "stats":  _get_stats(circ),
+        "optimised_gates": _extract_gates(opt_circ),
+        "optimised_stats": {**_get_stats(opt_circ), "note": opt_note},
+    }
+
+
 def _worker(code: str, result_queue: multiprocessing.Queue, selene_shots: int = 200) -> None:
     """
     Executes `code` and pushes a dict onto `result_queue`:
@@ -238,7 +341,8 @@ def _worker(code: str, result_queue: multiprocessing.Queue, selene_shots: int = 
                 except Exception as exc:
                     emit("info", f"Selene error: {exc}")
 
-            result_queue.put({"lines": lines, "hugr": hugr_dict, "selene": selene_data, "success": True})
+            tket_data = _build_tket_data(code, _qubit_params)
+            result_queue.put({"lines": lines, "hugr": hugr_dict, "selene": selene_data, "tket": tket_data, "success": True})
 
         finally:
             os.unlink(tmp_path)

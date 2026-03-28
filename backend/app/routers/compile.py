@@ -26,6 +26,7 @@ async def compile_endpoint(req: CompileRequest) -> CompileResponse:
         hugr_json=result.get("hugr"),
         elapsed_ms=result.get("elapsed_ms"),
         selene=result.get("selene"),
+        tket=result.get("tket"),
     )
     hugr_summary = f"{len(json.dumps(response.hugr_json))} bytes" if response.hugr_json else "None"
     selene_summary = (
@@ -35,6 +36,8 @@ async def compile_endpoint(req: CompileRequest) -> CompileResponse:
     logger.debug("POST /api/compile — success: %s, elapsed_ms: %s, hugr: %s, selene: %s\n%s",
                  response.success, response.elapsed_ms, hugr_summary, selene_summary,
                  "\n".join(f"  [{l.t}] {l.text}" for l in response.lines))
+    if response.tket:
+        logger.debug("TKET response:\n%s", json.dumps(response.tket.model_dump(), indent=2))
     if response.selene:
         logger.debug("Selene response:\n%s", json.dumps(response.selene.model_dump(), indent=2))
     return response

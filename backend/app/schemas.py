@@ -20,6 +20,30 @@ class OutputLine(BaseModel):
     text: str
 
 
+class TKETGate(BaseModel):
+    type: str
+    qubits: list[int]
+    bits: list[int] = []
+    col: int
+    native: bool = False
+
+
+class TKETStats(BaseModel):
+    gates: int
+    depth: int
+    twoQ: int
+    note: str = ""
+
+
+class TKETData(BaseModel):
+    qubits: list[str]
+    bits: list[str]
+    gates: list[TKETGate]
+    stats: TKETStats
+    optimised_gates: list[TKETGate]
+    optimised_stats: TKETStats
+
+
 class SeleneResult(BaseModel):
     state: str
     count: int
@@ -48,3 +72,4 @@ class CompileResponse(BaseModel):
     hugr_json: dict | None = None   # Serialised HUGR, if compilation succeeded
     elapsed_ms: int | None = None
     selene: SeleneData | None = None
+    tket: TKETData | None = None
