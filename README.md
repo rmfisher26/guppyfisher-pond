@@ -22,6 +22,12 @@ uvicorn app.main:app --reload
 # → http://localhost:8000/docs  (Swagger UI)
 ```
 
+Altenative:
+```bash
+docker compose up --build backend
+```
+
+
 ### 2. Frontend (Astro)
 
 ```bash
@@ -71,3 +77,4 @@ A `docker-compose.yml` is included in the root for convenience.
 
 Edit `frontend/src/data/programs.ts` and add an entry to `PROGRAMS`. The new
 program tab appears automatically — no component changes needed.
+

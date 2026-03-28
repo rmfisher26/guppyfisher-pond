@@ -1,13 +1,16 @@
+import logging
 from fastapi import APIRouter, HTTPException
 from app.schemas import CompileRequest, CompileResponse, OutputLine
 from app.services.compiler import compile_guppy
 from app.config import settings
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 @router.post("/compile", response_model=CompileResponse)
 async def compile_endpoint(req: CompileRequest) -> CompileResponse:
+    logger.debug("POST /api/compile — code length: %d", len(req.code))
     if len(req.code) > settings.max_code_length:
         raise HTTPException(
             status_code=400,
