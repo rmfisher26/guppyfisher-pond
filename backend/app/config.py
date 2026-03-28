@@ -3,7 +3,6 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     allowed_origins: list[str] = [
-        "http://localhost:4321",   # Astro dev server
         "https://guppyfisher.dev", # Production blog
     ]
     max_code_length: int = 4000    # Characters
