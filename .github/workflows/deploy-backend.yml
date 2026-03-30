@@ -51,6 +51,10 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --port 8000 \
+            --max-instances 1 \
+            --concurrency 10 \
+            --cpu 1 \
+            --memory 512Mi \
             --set-env-vars "ALLOWED_ORIGINS=[\"https://guppyfisher.dev\"],EXECUTION_TIMEOUT=10.0,MAX_CODE_LENGTH=4000,LOG_LEVEL=info"
 
       - name: Print service URL
