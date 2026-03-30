@@ -2,6 +2,12 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Build tools needed to compile Rust-based packages (hugr, selene-sim)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+  && rm -rf /var/lib/apt/lists/*
+
 # Install deps first (layer cache)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
