@@ -139,12 +139,6 @@ def _build_tket_data(code: str, qubit_params: list) -> dict | None:
     except ImportError:
         return None
 
-    n_qubits = len(qubit_params)
-    if n_qubits == 0:
-        return None
-
-    qubit_index = {name: i for i, name in enumerate(qubit_params)}
-
     GATE_MAP = {
         "h": _OpType.H, "x": _OpType.X, "y": _OpType.Y, "z": _OpType.Z,
         "cx": _OpType.CX, "cnot": _OpType.CX, "cz": _OpType.CZ,
@@ -157,13 +151,49 @@ def _build_tket_data(code: str, qubit_params: list) -> dict | None:
     except SyntaxError:
         return None
 
-    func_body = None
-    for node in _ast.walk(tree):
-        if isinstance(node, _ast.FunctionDef):
-            func_body = node.body
-            break
-    if func_body is None:
-        return None
+    # ── qubit() allocation style (main()/no-param style) ─────────────────────
+    # Build qubit_index by scanning all @guppy function bodies for:
+    #   q0, q1 = qubit(), qubit()   — direct allocations
+    #   q0, q1 = some_fn()          — tuple returns from other @guppy functions
+    # Gates are collected across all function bodies.
+    if not qubit_params:
+        qubit_index: dict[str, int] = {}
+        all_stmts: list = []
+
+        guppy_fns = [
+            n for n in _ast.walk(tree)
+            if isinstance(n, _ast.FunctionDef)
+        ]
+        for fn in guppy_fns:
+            for stmt in fn.body:
+                # `a, b = qubit(), qubit()` or `a, b = some_fn()`
+                if (
+                    isinstance(stmt, _ast.Assign)
+                    and len(stmt.targets) == 1
+                    and isinstance(stmt.targets[0], _ast.Tuple)
+                ):
+                    for elt in stmt.targets[0].elts:
+                        if isinstance(elt, _ast.Name) and elt.id not in qubit_index:
+                            # Only track names that look like qubit vars (not c0, c1…)
+                            if not elt.id.startswith("c"):
+                                qubit_index[elt.id] = len(qubit_index)
+                all_stmts.append(stmt)
+
+        n_qubits = len(qubit_index)
+        if n_qubits == 0:
+            return None
+        func_body = all_stmts
+    else:
+        # ── qubit parameter style ─────────────────────────────────────────────
+        n_qubits = len(qubit_params)
+        qubit_index = {name: i for i, name in enumerate(qubit_params)}
+        func_body = None
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.FunctionDef):
+                func_body = node.body
+                break
+        if func_body is None:
+            return None
 
     circ = _Circuit(n_qubits, n_qubits)
     for stmt in func_body:
