@@ -45,6 +45,66 @@ _ALLOWED_BUILTINS = {
 
 # ── Worker (runs in subprocess) ───────────────────────────────────────────────
 
+def _count_qubit_allocs(code: str) -> int:
+    """Count qubit() allocation calls in source (for main()-style programs)."""
+    import ast as _ast
+    try:
+        tree = _ast.parse(code)
+        return sum(
+            1 for node in _ast.walk(tree)
+            if isinstance(node, _ast.Call)
+            and isinstance(node.func, _ast.Name)
+            and node.func.id == "qubit"
+        )
+    except Exception:
+        return 0
+
+
+def _inject_result_calls_for_selene(code: str) -> tuple[str, int]:
+    """Inject result("out", name) after every `name = measure(q)` in main().
+
+    Returns (modified_code, n_injected).  If nothing to inject, returns the
+    original code with n=0.
+    """
+    import ast as _ast
+    try:
+        tree = _ast.parse(code)
+        main_fn = next(
+            (n for n in _ast.walk(tree)
+             if isinstance(n, _ast.FunctionDef) and n.name == "main"),
+            None,
+        )
+        if main_fn is None:
+            return code, 0
+
+        # Collect: end_lineno → (col_offset, var_name) for single-target measure assigns
+        inject: dict[int, tuple[int, str]] = {}
+        for stmt in _ast.walk(main_fn):
+            if (
+                isinstance(stmt, _ast.Assign)
+                and len(stmt.targets) == 1
+                and isinstance(stmt.targets[0], _ast.Name)
+                and isinstance(stmt.value, _ast.Call)
+                and isinstance(stmt.value.func, _ast.Name)
+                and stmt.value.func.id == "measure"
+            ):
+                inject[stmt.end_lineno] = (stmt.col_offset, stmt.targets[0].id)
+
+        if not inject:
+            return code, 0
+
+        lines = code.splitlines()
+        new_lines: list[str] = []
+        for i, line in enumerate(lines, start=1):
+            new_lines.append(line)
+            if i in inject:
+                ind, var = inject[i]
+                new_lines.append(" " * ind + f'result("out", {var})')
+        return "\n".join(new_lines), len(inject)
+    except Exception:
+        return code, 0
+
+
 def _synthesize_timeline(code: str, n_qubits: int) -> list:
     """Build a simplified state-evolution timeline by scanning the source for gate calls."""
     lower = code.lower()
@@ -216,16 +276,31 @@ def _worker(code: str, result_queue: multiprocessing.Queue, selene_shots: int = 
             tmp.write(code)
             tmp_path = tmp.name
         try:
-            exec(compile(code, tmp_path, "exec"), namespace)  # noqa: S102
+            # Module-level calls like `main.compile()` or `main.emulator().run()`
+            # may fail, but @guppy decorators run first and register functions.
+            # Capture exec errors so we can proceed if functions were registered.
+            _exec_error = None
+            try:
+                exec(compile(code, tmp_path, "exec"), namespace)  # noqa: S102
+            except Exception as _e:
+                _exec_error = _e
 
             from guppylang.defs import GuppyFunctionDefinition as _GuppyFn
             guppy_fns = [v for v in namespace.values() if isinstance(v, _GuppyFn)]
             if not guppy_fns:
+                if _exec_error:
+                    raise _exec_error  # no functions registered — real error
                 emit("error", "No @guppy function found in submitted code.")
                 result_queue.put({"lines": lines, "hugr": None, "success": False})
                 return
 
-            fn_def = guppy_fns[-1]
+            # Prefer a function named 'main'; fall back to last defined
+            _fn_by_name = {
+                getattr(getattr(v, "wrapped", None), "name", None): v
+                for v in guppy_fns
+            }
+            _main_fn = _fn_by_name.get("main")
+            fn_def = _main_fn if _main_fn is not None else guppy_fns[-1]
             fn_name = getattr(fn_def.wrapped, "name", "function")
             emit("info", f"Compiling function: {fn_name!r}")
             hugr = fn_def.compile_function()
@@ -257,6 +332,11 @@ def _worker(code: str, result_queue: multiprocessing.Queue, selene_shots: int = 
             ]
             n_qubits = len(_qubit_params)
 
+            # For main()-style programs, qubits are allocated inside with qubit()
+            _no_input_entry = (n_qubits == 0)
+            if _no_input_entry:
+                n_qubits = _count_qubit_allocs(code)
+
             selene_data = None
             if n_qubits > 0:
                 try:
@@ -265,54 +345,80 @@ def _worker(code: str, result_queue: multiprocessing.Queue, selene_shots: int = 
 
                     N_SHOTS = selene_shots
 
-                    # Selene requires a no-input entry point — wrap the user's
-                    # function in one that allocates qubits internally and records
-                    # measurement results via result("out", ...).
-                    _return_ann = _python_func.__annotations__.get("return", None)
-
-                    def _is_bool_type(a: object) -> bool:
-                        # In the exec'd namespace, bool annotations are GuppyDefinitions
-                        # wrapping an OpaqueTypeDef named 'bool', not Python's bool itself.
-                        if a is bool:
-                            return True
-                        wrapped = getattr(a, "wrapped", None)
-                        return getattr(wrapped, "name", None) == "bool"
-
-                    _n_bools = 0
-                    if _return_ann is not None:
-                        _args = getattr(_return_ann, "__args__", None)
-                        if _args:
-                            _n_bools = sum(1 for a in _args if _is_bool_type(a))
-                        elif _is_bool_type(_return_ann):
-                            _n_bools = 1
-
-                    _allocations = "\n    ".join(f"{name} = qubit()" for name in _qubit_params)
-                    _call_args = ", ".join(_qubit_params)
-                    if _n_bools > 0:
-                        _ret_vars = ", ".join(f"_b{i}" for i in range(_n_bools))
-                        _result_calls = "\n    ".join(f'result("out", _b{i})' for i in range(_n_bools))
-                        _call_line = f"    {_ret_vars} = {fn_name}({_call_args})\n    {_result_calls}"
+                    if _no_input_entry:
+                        # Entry function takes no inputs (main()-style).
+                        # Inject result() calls after measure() assignments so
+                        # Selene can track measurement outcomes, then recompile.
+                        _modified_code, _n_injected = _inject_result_calls_for_selene(code)
+                        if _n_injected > 0:
+                            import linecache as _linecache
+                            _sel_filename = f"<selene_main_{fn_name}>"
+                            _linecache.cache[_sel_filename] = (
+                                len(_modified_code), None,
+                                _modified_code.splitlines(True), _sel_filename,
+                            )
+                            _sel_exec_err = None
+                            try:
+                                exec(compile(_modified_code, _sel_filename, "exec"), namespace)  # noqa: S102
+                            except Exception as _se:
+                                _sel_exec_err = _se
+                            _sel_fns = [
+                                v for v in namespace.values()
+                                if isinstance(v, _GuppyFn)
+                                and getattr(getattr(v, "wrapped", None), "name", None) == "main"
+                            ]
+                            if _sel_fns and not _sel_exec_err:
+                                _entry_hugr = _sel_fns[-1].compile_function()
+                            else:
+                                _entry_hugr = hugr  # fall back to original
+                        else:
+                            _entry_hugr = hugr
                     else:
-                        _call_line = f"    {fn_name}({_call_args})"
+                        # Wrap the user's function in a no-input entry point that
+                        # allocates qubits and records measurement results.
+                        _return_ann = _python_func.__annotations__.get("return", None)
 
-                    _wrapper_src = (
-                        f"@guppy\n"
-                        f"def _selene_entry() -> None:\n"
-                        f"    {_allocations}\n"
-                        f"{_call_line}\n"
-                    )
-                    import linecache as _linecache
-                    _fake_filename = f"<selene_wrapper_{fn_name}>"
-                    _linecache.cache[_fake_filename] = (
-                        len(_wrapper_src), None, _wrapper_src.splitlines(True), _fake_filename
-                    )
-                    exec(compile(_wrapper_src, _fake_filename, "exec"), namespace)
-                    _entry_fns = [
-                        v for v in namespace.values()
-                        if isinstance(v, _GuppyFn)
-                        and getattr(getattr(v, "wrapped", None), "name", "") == "_selene_entry"
-                    ]
-                    _entry_hugr = _entry_fns[-1].compile_function()
+                        def _is_bool_type(a: object) -> bool:
+                            if a is bool:
+                                return True
+                            wrapped = getattr(a, "wrapped", None)
+                            return getattr(wrapped, "name", None) == "bool"
+
+                        _n_bools = 0
+                        if _return_ann is not None:
+                            _args = getattr(_return_ann, "__args__", None)
+                            if _args:
+                                _n_bools = sum(1 for a in _args if _is_bool_type(a))
+                            elif _is_bool_type(_return_ann):
+                                _n_bools = 1
+
+                        _allocations = "\n    ".join(f"{name} = qubit()" for name in _qubit_params)
+                        _call_args = ", ".join(_qubit_params)
+                        if _n_bools > 0:
+                            _ret_vars = ", ".join(f"_b{i}" for i in range(_n_bools))
+                            _result_calls = "\n    ".join(f'result("out", _b{i})' for i in range(_n_bools))
+                            _call_line = f"    {_ret_vars} = {fn_name}({_call_args})\n    {_result_calls}"
+                        else:
+                            _call_line = f"    {fn_name}({_call_args})"
+
+                        _wrapper_src = (
+                            f"@guppy\n"
+                            f"def _selene_entry() -> None:\n"
+                            f"    {_allocations}\n"
+                            f"{_call_line}\n"
+                        )
+                        import linecache as _linecache
+                        _fake_filename = f"<selene_wrapper_{fn_name}>"
+                        _linecache.cache[_fake_filename] = (
+                            len(_wrapper_src), None, _wrapper_src.splitlines(True), _fake_filename
+                        )
+                        exec(compile(_wrapper_src, _fake_filename, "exec"), namespace)
+                        _entry_fns = [
+                            v for v in namespace.values()
+                            if isinstance(v, _GuppyFn)
+                            and getattr(getattr(v, "wrapped", None), "name", "") == "_selene_entry"
+                        ]
+                        _entry_hugr = _entry_fns[-1].compile_function()
 
                     runner = _selene_build(_entry_hugr)
                     raw = runner.run_shots(_Quest(), n_qubits=n_qubits, n_shots=N_SHOTS)
